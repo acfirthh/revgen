@@ -41,16 +41,41 @@ The script also allows for encoding the reverse shell scripts. The options are *
 - **crystal** = 1
 - **powershell** = 4
 
+## Requirements
+The only requirement for this tool to run is that Python3 is installed.\
+If it is not, you can install it using your favourite package manager.
+
+### On Ubuntu/Debian (apt):
+1. Update package list: `sudo apt update`
+2. Install Python3: `sudo apt install python3`
+3. Verify Installation: `python3 --version`
+
+### On CentOS/RHEL (yum):
+1. Enable EPEL Repository: `sudo yum install epel-release`
+2. Install Python3: `sudo yum install python3`
+3. Verify Installation: `python3 --version`
+
+### On Fedora (dnf):
+1. Install Python3: `sudo dnf install python3`
+2. Verify Installation: `python3 --version`
+
+### On Arch Linux (pacman):
+1. Install Python3: `sudo pacman -S python`
+2. Verify Installation: `python3 --version`
+
 ## Installation
-1. Make the **installer.sh** script executable:\
-   `chmod +x installer.sh`
+1. Clone the repository to your machine:\
+   `git clone https://github.com/acfirthh/revgen.git`
+   
+2. Change directory into the cloned repo and make the **installer.sh** script executable:\
+   `cd revgen; chmod +x installer.sh`
 
-2. Run the **installer.sh** script:\
-`./installer.sh`\
-If the script gets a **permission denied** error, then it should be run as root or using sudo:\
-`sudo ./installer.sh`
+3. Run the **installer.sh** script:\
+   `./installer.sh`\
+   If the script gets a **permission denied** error, then it should be run as root or using sudo:\
+   `sudo ./installer.sh`
 
-3. If the **installer.sh** script runs successfully, then the **revgen** script should be callable through the command line.
+5. If the **installer.sh** script runs successfully, then the **revgen** script should be callable through the command line.
 
 > If you attempt to call the script by running the command `revgen` and it fails, then you should make sure that the directory `/usr/local/bin` is in your **PATH environment variable**.
 
