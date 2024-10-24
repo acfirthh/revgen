@@ -4,6 +4,12 @@
 SCRIPT_NAME="revgen"
 TARGET_DIR="/usr/local/bin"
 
+# Check if Python3 is installed
+if ! command -v python3 &> /dev/null; then
+    printf "\n[!] Error: Python3 is not installed.\n    Install Python3 using your favourite package manager and then run the installation script again.\n"
+    exit 1
+fi
+
 # Check if the script is being run as root
 if [[ $EUID -ne 0 ]]; then
     printf "[info] This script is NOT being run as root.\n\n"
